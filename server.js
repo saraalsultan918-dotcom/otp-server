@@ -3,6 +3,9 @@ const cors = require("cors");
 const axios = require("axios");
 
 const admin = require("firebase-admin");
+const serviceAccount = JSON.parse(
+  process.env.FIREBASE_KEY.replace(/\\n/g, '\n')
+);
 
 // 🔥 ربط Firebase
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
