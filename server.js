@@ -1,15 +1,21 @@
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
-
-
 const admin = require("firebase-admin");
+const { v4: uuidv4 } = require("uuid");
 
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+// 🔐 Firebase
 const serviceAccount = {
   type: "service_account",
   project_id: process.env.FIREBASE_PROJECT_ID,
   client_email: process.env.FIREBASE_CLIENT_EMAIL,
-  private_key: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
+  private_key: process.env.FIREBASE_PRIVATE_KEY
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    : undefined,
 };
 
 admin.initializeApp({
@@ -18,16 +24,15 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// ✅ route للتأكد أن السيرفر شغال
+// ✅ check
 app.get("/", (req, res) => {
   res.send("OTP Server is running ✅");
 });
 
+
+// =============================
 // 🔥 إرسال OTP
+// =============================
 app.post("/send-otp", async (req, res) => {
   const { email } = req.body;
 
@@ -36,15 +41,16 @@ app.post("/send-otp", async (req, res) => {
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpId = uuidv4();
 
   try {
-    // 🔥 نخزن في Firebase بدل RAM
-    await db.collection("otp").doc(email).set({
+    await db.collection("otp").doc(otpId).set({
+      email: email.trim().toLowerCase(),
       code: otp,
       expires: Date.now() + 5 * 60 * 1000,
     });
 
-    // إرسال عبر Brevo
+    // ✉️ إرسال الإيميل
     await axios.post(
       "https://api.brevo.com/v3/smtp/email",
       {
@@ -66,7 +72,10 @@ app.post("/send-otp", async (req, res) => {
 
     console.log("OTP:", otp);
 
-    res.json({ success: true });
+    res.json({
+      success: true,
+      otpId: otpId, // 🔥 مهم
+    });
 
   } catch (err) {
     console.error(err);
@@ -74,12 +83,19 @@ app.post("/send-otp", async (req, res) => {
   }
 });
 
-// 🔥 التحقق من OTP
+
+// =============================
+// 🔥 تحقق OTP
+// =============================
 app.post("/verify-otp", async (req, res) => {
-  const { email, otp } = req.body;
+  const { otpId, otp } = req.body;
+
+  if (!otpId || !otp) {
+    return res.json({ success: false });
+  }
 
   try {
-    const doc = await db.collection("otp").doc(email).get();
+    const doc = await db.collection("otp").doc(otpId).get();
 
     if (!doc.exists) {
       return res.json({ success: false });
@@ -87,15 +103,13 @@ app.post("/verify-otp", async (req, res) => {
 
     const data = doc.data();
 
-    // انتهى الوقت
     if (Date.now() > data.expires) {
-      await db.collection("otp").doc(email).delete();
+      await db.collection("otp").doc(otpId).delete();
       return res.json({ success: false });
     }
 
-    // تحقق
     if (data.code.toString() === otp.toString()) {
-      await db.collection("otp").doc(email).delete();
+      await db.collection("otp").doc(otpId).delete();
       return res.json({ success: true });
     }
 
@@ -107,7 +121,8 @@ app.post("/verify-otp", async (req, res) => {
   }
 });
 
-// 🔥 تشغيل السيرفر
+
+// تشغيل
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
