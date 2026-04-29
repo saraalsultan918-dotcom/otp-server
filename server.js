@@ -2,35 +2,44 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 
+const admin = require("firebase-admin");
+
+// 🔥 ربط Firebase
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+});
+
+const db = admin.firestore();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
-
-// 🔐 تخزين مؤقت للأكواد مع وقت الانتهاء
-let otpStore = {};
 
 // ✅ route للتأكد أن السيرفر شغال
 app.get("/", (req, res) => {
   res.send("OTP Server is running ✅");
 });
 
-// 🔥 إرسال OTP عبر Brevo
+// 🔥 إرسال OTP
 app.post("/send-otp", async (req, res) => {
   const { email } = req.body;
 
   if (!email) {
-    return res.json({ success: false, message: "Email is required" });
+    return res.json({ success: false });
   }
 
   const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-  // نخزن OTP مع وقت انتهاء (5 دقائق)
-  otpStore[email] = {
-    code: otp,
-    expires: Date.now() + 5 * 60 * 1000,
-  };
-
   try {
+    // 🔥 نخزن في Firebase بدل RAM
+    await db.collection("otp").doc(email).set({
+      code: otp,
+      expires: Date.now() + 5 * 60 * 1000,
+    });
+
+    // إرسال عبر Brevo
     await axios.post(
       "https://api.brevo.com/v3/smtp/email",
       {
@@ -40,7 +49,7 @@ app.post("/send-otp", async (req, res) => {
         },
         to: [{ email }],
         subject: "OTP Code",
-        htmlContent: `<h2>رمز التحقق الخاص بك: ${otp}</h2>`,
+        htmlContent: `<h2>رمز التحقق: ${otp}</h2>`,
       },
       {
         headers: {
@@ -50,36 +59,47 @@ app.post("/send-otp", async (req, res) => {
       }
     );
 
-    console.log("OTP sent to:", email);
+    console.log("OTP:", otp);
 
     res.json({ success: true });
+
   } catch (err) {
-    console.error("Brevo error:", err.response?.data || err.message);
+    console.error(err);
     res.json({ success: false });
   }
 });
 
 // 🔥 التحقق من OTP
-app.post("/verify-otp", (req, res) => {
+app.post("/verify-otp", async (req, res) => {
   const { email, otp } = req.body;
 
-  const record = otpStore[email];
+  try {
+    const doc = await db.collection("otp").doc(email).get();
 
-  if (!record) {
-    return res.json({ success: false, message: "No OTP found" });
+    if (!doc.exists) {
+      return res.json({ success: false });
+    }
+
+    const data = doc.data();
+
+    // انتهى الوقت
+    if (Date.now() > data.expires) {
+      await db.collection("otp").doc(email).delete();
+      return res.json({ success: false });
+    }
+
+    // تحقق
+    if (data.code.toString() === otp.toString()) {
+      await db.collection("otp").doc(email).delete();
+      return res.json({ success: true });
+    }
+
+    res.json({ success: false });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false });
   }
-
-  if (Date.now() > record.expires) {
-    delete otpStore[email];
-    return res.json({ success: false, message: "OTP expired" });
-  }
-
-  if (record.code === otp) {
-    delete otpStore[email];
-    return res.json({ success: true });
-  }
-
-  res.json({ success: false, message: "Invalid OTP" });
 });
 
 // 🔥 تشغيل السيرفر
