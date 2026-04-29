@@ -31,7 +31,7 @@ app.get("/", (req, res) => {
 
 
 // =============================
-// 🔥 إرسال OTP
+// 🔥 إرسال OTP + فحص الإيميل
 // =============================
 app.post("/send-otp", async (req, res) => {
   const { email } = req.body;
@@ -40,12 +40,31 @@ app.post("/send-otp", async (req, res) => {
     return res.json({ success: false });
   }
 
-  const otp = Math.floor(100000 + Math.random() * 900000).toString();
-  const otpId = uuidv4();
+  const normalizedEmail = email.trim().toLowerCase();
 
   try {
+    // 🔥 تحقق إذا الإيميل موجود في Firebase Auth
+    try {
+      await admin.auth().getUserByEmail(normalizedEmail);
+
+      // ❌ الإيميل موجود
+      return res.json({
+        success: false,
+        error: "EMAIL_ALREADY_EXISTS",
+      });
+
+    } catch (err) {
+      if (err.code !== "auth/user-not-found") {
+        throw err;
+      }
+      // ✅ الإيميل غير موجود → كمل
+    }
+
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpId = uuidv4();
+
     await db.collection("otp").doc(otpId).set({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       code: otp,
       expires: Date.now() + 5 * 60 * 1000,
     });
@@ -58,7 +77,7 @@ app.post("/send-otp", async (req, res) => {
           name: "Medical Complaints",
           email: "saraalsultan918@gmail.com",
         },
-        to: [{ email }],
+        to: [{ email: normalizedEmail }],
         subject: "OTP Code",
         htmlContent: `<h2>رمز التحقق: ${otp}</h2>`,
       },
@@ -74,7 +93,7 @@ app.post("/send-otp", async (req, res) => {
 
     res.json({
       success: true,
-      otpId: otpId, // 🔥 مهم
+      otpId: otpId,
     });
 
   } catch (err) {
@@ -103,11 +122,13 @@ app.post("/verify-otp", async (req, res) => {
 
     const data = doc.data();
 
+    // ⏰ انتهى الوقت
     if (Date.now() > data.expires) {
       await db.collection("otp").doc(otpId).delete();
       return res.json({ success: false });
     }
 
+    // ✅ تحقق الكود
     if (data.code.toString() === otp.toString()) {
       await db.collection("otp").doc(otpId).delete();
       return res.json({ success: true });
@@ -122,7 +143,7 @@ app.post("/verify-otp", async (req, res) => {
 });
 
 
-// تشغيل
+// 🚀 تشغيل السيرفر
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
