@@ -15,7 +15,7 @@ app.get("/", (req, res) => {
   res.send("OTP Server is running ✅");
 });
 
-// 🔥 إرسال OTP عبر Brevo
+//  إرسال OTP عبر Brevo
 app.post("/send-otp", async (req, res) => {
   const { email } = req.body;
 
@@ -88,7 +88,7 @@ app.post("/verify-otp", (req, res) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log("Server running on port " + PORT);
-=======
+
 const express = require("express");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
