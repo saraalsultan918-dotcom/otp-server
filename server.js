@@ -7,8 +7,6 @@ const serviceAccount = JSON.parse(
   process.env.FIREBASE_KEY.replace(/\\n/g, '\n')
 );
 
-// 🔥 ربط Firebase
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
